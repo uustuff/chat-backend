@@ -13,8 +13,12 @@ let messages = [];
 let messageIdCounter = 0;
 let onlineUsers = []; // List of online users
 
-// Serve static files from the 'public' directory
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname)));
+
+// Fallback route to serve index.html for all unknown routes
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 wss.on('connection', (ws) => {
     console.log('New client connected');
