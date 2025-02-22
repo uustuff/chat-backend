@@ -17,7 +17,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 wss.on('connection', (ws) => {
     console.log('New client connected');
-
     ws.send(JSON.stringify({ type: 'init', messages }));
 
     ws.on('message', (message) => {
@@ -26,18 +25,33 @@ wss.on('connection', (ws) => {
         switch (data.type) {
             case 'user':
                 if (data.message === '!online') {
-                    const onlineUsernames = onlineUsers.map((user, index) => `${index + 1}. ${user.username}👨‍💻`).join('<br>');
-                    ws.send(JSON.stringify({ type: 'system', message: `Online users 🌐:<br>${onlineUsernames}` }));
+                    const userList = onlineUsers.map((u, i) => `${i + 1}. ${u.username}👨‍💻`).join('<br>');
+                    ws.send(JSON.stringify({ type: 'system', message: `Online users 🌐:<br>${userList}` }));
                 } else {
-                    const newMessage = {
+                    let mentionedUsers = [];
+                    let newMessage = {
                         id: messageIdCounter++,
                         type: 'user',
                         username: data.username,
                         message: data.message,
                         isAdmin: false
                     };
+
                     messages.push(newMessage);
                     broadcast(newMessage);
+
+                    data.message.replace(/@(\w+)/g, (_, mentionedUser) => {
+                        let user = onlineUsers.find(u => u.username === mentionedUser);
+                        if (user) mentionedUsers.push(user.ws);
+                    });
+
+                    mentionedUsers.forEach(userWs => {
+                        userWs.send(JSON.stringify({
+                            type: 'mention',
+                            from: data.username,
+                            message: data.message
+                        }));
+                    });
                 }
                 break;
             case 'admin-login':
@@ -50,9 +64,8 @@ wss.on('connection', (ws) => {
                 break;
             case 'delete-message':
                 if (adminClients.includes(ws)) {
-                    const messageId = parseInt(data.messageId);
-                    messages = messages.filter(msg => msg.id !== messageId);
-                    broadcast({ type: 'delete-message', messageId });
+                    messages = messages.filter(msg => msg.id !== parseInt(data.messageId));
+                    broadcast({ type: 'delete-message', messageId: data.messageId });
                 }
                 break;
             case 'typing':
@@ -68,13 +81,12 @@ wss.on('connection', (ws) => {
 
     ws.on('message', (message) => {
         const data = JSON.parse(message);
-        if (data.type === 'user' && !onlineUsers.find(user => user.username === data.username)) {
+        if (data.type === 'user' && !onlineUsers.some(user => user.username === data.username)) {
             onlineUsers.push({ ws, username: data.username });
         }
     });
 
     ws.on('close', () => {
-        console.log('Client disconnected');
         clients = clients.filter(client => client !== ws);
         adminClients = adminClients.filter(admin => admin !== ws);
         onlineUsers = onlineUsers.filter(user => user.ws !== ws);
@@ -82,11 +94,7 @@ wss.on('connection', (ws) => {
 });
 
 function broadcast(message) {
-    clients.forEach(client => {
-        client.send(JSON.stringify(message));
-    });
+    clients.forEach(client => client.send(JSON.stringify(message)));
 }
 
-server.listen(3000, () => {
-    console.log('Server is running on port 3000');
-});
+server.listen(3000, () => console.log('Server running on port 3000'));
