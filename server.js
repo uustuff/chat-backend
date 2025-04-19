@@ -15,6 +15,18 @@ let onlineUsers = [];
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+function broadcastOnlineUsers() {
+    const users = onlineUsers.map(user => user.username);
+    clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+                type: 'online-users',
+                users: users
+            }));
+        }
+    });
+}
+
 wss.on('connection', (ws) => {
     console.log('New client connected');
     ws.send(JSON.stringify({ type: 'init', messages }));
@@ -34,7 +46,8 @@ wss.on('connection', (ws) => {
                         type: 'user',
                         username: data.username,
                         message: data.message,
-                        isAdmin: false
+                        isAdmin: false,
+                        timestamp: Date.now()
                     };
 
                     messages.push(newMessage);
@@ -46,11 +59,13 @@ wss.on('connection', (ws) => {
                     });
 
                     mentionedUsers.forEach(userWs => {
-                        userWs.send(JSON.stringify({
-                            type: 'mention',
-                            from: data.username,
-                            message: data.message
-                        }));
+                        if (userWs.readyState === WebSocket.OPEN) {
+                            userWs.send(JSON.stringify({
+                                type: 'mention',
+                                from: data.username,
+                                message: data.message
+                            }));
+                        }
                     });
                 }
                 break;
@@ -83,6 +98,7 @@ wss.on('connection', (ws) => {
         const data = JSON.parse(message);
         if (data.type === 'user' && !onlineUsers.some(user => user.username === data.username)) {
             onlineUsers.push({ ws, username: data.username });
+            broadcastOnlineUsers();
         }
     });
 
@@ -90,11 +106,21 @@ wss.on('connection', (ws) => {
         clients = clients.filter(client => client !== ws);
         adminClients = adminClients.filter(admin => admin !== ws);
         onlineUsers = onlineUsers.filter(user => user.ws !== ws);
+        broadcastOnlineUsers();
     });
+
+    broadcastOnlineUsers();
 });
 
 function broadcast(message) {
-    clients.forEach(client => client.send(JSON.stringify(message)));
+    clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(message));
+        }
+    });
 }
+
+// Send online users list every 5 seconds
+setInterval(broadcastOnlineUsers, 5000);
 
 server.listen(3000, () => console.log('Server running on port 3000'));
