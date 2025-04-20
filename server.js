@@ -50,6 +50,13 @@ wss.on('connection', (ws) => {
                         timestamp: Date.now()
                     };
 
+                    // Handle reply data
+                    if (data.replyTo) {
+                        newMessage.replyTo = data.replyTo;
+                        newMessage.replyUsername = data.replyUsername;
+                        newMessage.replyMessage = data.replyMessage;
+                    }
+
                     messages.push(newMessage);
                     broadcast(newMessage);
 
