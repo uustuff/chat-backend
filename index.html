@@ -12,9 +12,15 @@
         <div id="chat-window">
             <div id="output"></div>
             <div id="feedback"></div>
+            <div id="reply-preview" style="display: none;">
+                <div id="reply-content"></div>
+                <button id="cancel-reply">×</button>
+            </div>
         </div>
+        
         <input type="text" id="username" placeholder="Enter your username">
         <button id="admin-login-btn" style="display: none;">Login as Admin</button>
+        
         <input type="text" id="message" placeholder="Type your message" autocomplete="off">
         <div id="suggestions-container" style="display: none;">
             <div id="suggestions-list"></div>
