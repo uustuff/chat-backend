@@ -5,7 +5,7 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, maxPayload: 15 * 1024 * 1024 }); // Increased payload limit to 15MB
 
 let clients = [];
 let adminClients = [];
@@ -14,6 +14,21 @@ let messageIdCounter = 0;
 let onlineUsers = [];
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Add this route to handle file downloads
+app.get('/download/:fileId', (req, res) => {
+    const fileId = req.params.fileId;
+    const message = messages.find(msg => msg.type === 'file' && msg.fileId === fileId);
+    
+    if (message) {
+        const buffer = Buffer.from(message.fileData, 'base64');
+        res.setHeader('Content-Type', message.fileType);
+        res.setHeader('Content-Disposition', `attachment; filename=${message.fileName}`);
+        res.send(buffer);
+    } else {
+        res.status(404).send('File not found');
+    }
+});
 
 function broadcastOnlineUsers() {
     const users = onlineUsers.map(user => user.username);
@@ -32,80 +47,122 @@ wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'init', messages }));
 
     ws.on('message', (message) => {
-        const data = JSON.parse(message);
+        try {
+            const data = JSON.parse(message);
 
-        switch (data.type) {
-            case 'user':
-                if (data.message === '!online') {
-                    const userList = onlineUsers.map((u, i) => `${i + 1}. ${u.username}👨‍💻`).join('<br>');
-                    ws.send(JSON.stringify({ type: 'system', message: `Online users 🌐:<br>${userList}` }));
-                } else {
-                    let mentionedUsers = [];
-                    let newMessage = {
+            switch (data.type) {
+                case 'user':
+                    if (data.message === '!online') {
+                        const userList = onlineUsers.map((u, i) => `${i + 1}. ${u.username}👨‍💻`).join('<br>');
+                        ws.send(JSON.stringify({ type: 'system', message: `Online users 🌐:<br>${userList}` }));
+                    } else {
+                        let mentionedUsers = [];
+                        let newMessage = {
+                            id: messageIdCounter++,
+                            type: 'user',
+                            username: data.username,
+                            message: data.message,
+                            isAdmin: false,
+                            timestamp: Date.now()
+                        };
+
+                        // Handle reply data
+                        if (data.replyTo) {
+                            newMessage.replyTo = data.replyTo;
+                            newMessage.replyUsername = data.replyUsername;
+                            newMessage.replyMessage = data.replyMessage;
+                        }
+
+                        messages.push(newMessage);
+                        broadcast(newMessage);
+
+                        data.message.replace(/@(\w+)/g, (_, mentionedUser) => {
+                            let user = onlineUsers.find(u => u.username === mentionedUser);
+                            if (user) mentionedUsers.push(user.ws);
+                        });
+
+                        mentionedUsers.forEach(userWs => {
+                            if (userWs.readyState === WebSocket.OPEN) {
+                                userWs.send(JSON.stringify({
+                                    type: 'mention',
+                                    from: data.username,
+                                    message: data.message
+                                }));
+                            }
+                        });
+                    }
+                    break;
+                case 'file':
+                    if (data.fileSize > 10 * 1024 * 1024) {
+                        ws.send(JSON.stringify({
+                            type: 'system',
+                            message: 'File size exceeds 10MB limit'
+                        }));
+                        return;
+                    }
+
+                    const newFileMessage = {
                         id: messageIdCounter++,
-                        type: 'user',
+                        type: 'file',
                         username: data.username,
-                        message: data.message,
+                        fileId: data.fileId,
+                        fileName: data.fileName,
+                        fileType: data.fileType,
+                        fileSize: data.fileSize,
+                        fileData: data.fileData,
+                        fileCategory: data.fileCategory,
+                        message: data.message || '',
                         isAdmin: false,
                         timestamp: Date.now()
                     };
 
-                    // Handle reply data
+                    // Handle reply data for files
                     if (data.replyTo) {
-                        newMessage.replyTo = data.replyTo;
-                        newMessage.replyUsername = data.replyUsername;
-                        newMessage.replyMessage = data.replyMessage;
+                        newFileMessage.replyTo = data.replyTo;
+                        newFileMessage.replyUsername = data.replyUsername;
+                        newFileMessage.replyMessage = data.replyMessage;
                     }
 
-                    messages.push(newMessage);
-                    broadcast(newMessage);
-
-                    data.message.replace(/@(\w+)/g, (_, mentionedUser) => {
-                        let user = onlineUsers.find(u => u.username === mentionedUser);
-                        if (user) mentionedUsers.push(user.ws);
-                    });
-
-                    mentionedUsers.forEach(userWs => {
-                        if (userWs.readyState === WebSocket.OPEN) {
-                            userWs.send(JSON.stringify({
-                                type: 'mention',
-                                from: data.username,
-                                message: data.message
-                            }));
-                        }
-                    });
-                }
-                break;
-            case 'admin-login':
-                if (data.username === 'admin' && data.password === '690595') {
-                    ws.send(JSON.stringify({ type: 'admin-login-success' }));
-                    adminClients.push(ws);
-                } else {
-                    ws.send(JSON.stringify({ type: 'admin-login-failed' }));
-                }
-                break;
-            case 'delete-message':
-                if (adminClients.includes(ws)) {
-                    messages = messages.filter(msg => msg.id !== parseInt(data.messageId));
-                    broadcast({ type: 'delete-message', messageId: data.messageId });
-                }
-                break;
-            case 'typing':
-                broadcast({ type: 'typing', username: data.username });
-                break;
-            case 'stop-typing':
-                broadcast({ type: 'stop-typing', username: data.username });
-                break;
+                    messages.push(newFileMessage);
+                    broadcast(newFileMessage);
+                    break;
+                case 'admin-login':
+                    if (data.username === 'admin' && data.password === '690595') {
+                        ws.send(JSON.stringify({ type: 'admin-login-success' }));
+                        adminClients.push(ws);
+                    } else {
+                        ws.send(JSON.stringify({ type: 'admin-login-failed' }));
+                    }
+                    break;
+                case 'delete-message':
+                    if (adminClients.includes(ws)) {
+                        messages = messages.filter(msg => msg.id !== parseInt(data.messageId));
+                        broadcast({ type: 'delete-message', messageId: data.messageId });
+                    }
+                    break;
+                case 'typing':
+                    broadcast({ type: 'typing', username: data.username });
+                    break;
+                case 'stop-typing':
+                    broadcast({ type: 'stop-typing', username: data.username });
+                    break;
+            }
+        } catch (error) {
+            console.error('Error processing message:', error);
         }
     });
 
     clients.push(ws);
 
     ws.on('message', (message) => {
-        const data = JSON.parse(message);
-        if (data.type === 'user' && !onlineUsers.some(user => user.username === data.username)) {
-            onlineUsers.push({ ws, username: data.username });
-            broadcastOnlineUsers();
+        try {
+            const data = JSON.parse(message);
+            if ((data.type === 'user' || data.type === 'file') && !onlineUsers.some(user => user.username === data.username)) {
+                onlineUsers.push({ ws, username: data.username });
+                broadcastOnlineUsers();
+            }
+        } catch (error) {
+            console.error('Error processing online user:', error);
         }
     });
 
