@@ -127,7 +127,7 @@ wss.on('connection', (ws) => {
                     broadcast(newFileMessage);
                     break;
                 case 'admin-login':
-                    if (data.username === 'admin' && data.password === '690595') {
+                    if (data.username === 'admin' && data.password === 'pc44@uu') {
                         ws.send(JSON.stringify({ type: 'admin-login-success' }));
                         adminClients.push(ws);
                     } else {
