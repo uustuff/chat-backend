@@ -63,7 +63,7 @@ wss.on('connection', (ws) => {
                             username: data.username,
                             message: data.message,
                             isAdmin: false,
-                            timestamp: Date.now()
+                            timestamp: Date.now() // Add timestamp
                         };
 
                         // Handle reply data
@@ -113,7 +113,7 @@ wss.on('connection', (ws) => {
                         fileCategory: data.fileCategory,
                         message: data.message || '',
                         isAdmin: false,
-                        timestamp: Date.now()
+                        timestamp: Date.now() // Add timestamp
                     };
 
                     // Handle reply data for files
